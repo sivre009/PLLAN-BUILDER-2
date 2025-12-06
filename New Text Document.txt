@@ -82,10 +82,10 @@
             return filename.replace(/\.[^/.]+$/, "");
         };
 
-        const getMarkerLabel = (index, type) => {
-            if (type === 'letter') {
-                let label = '';
-                let i = index;
+            const getMarkerLabel = (index, type) => {
+                if (type === 'letter') {
+                    let label = '';
+                    let i = index;
                 if (i < 0) return '';
                 do {
                     label = String.fromCharCode((i % 26) + 65) + label;
@@ -838,7 +838,38 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                 pushHistory({ ...state, floatingImages: [...currentFloating, ...newFloating] });
             });
 
-            const handleCanvasDrop = async (files, x, y) => { 
+            const createFloatingFromHtml = async (file, x, y) => {
+                const fileContent = await readTextFile(file);
+                const blob = new Blob([fileContent], { type: 'text/html' });
+                const previewUrl = URL.createObjectURL(blob);
+                const fileName = file.name;
+                const baseName = getFileNameWithoutExtension(fileName).substring(0, 20);
+                const id = 'f-' + Date.now();
+                const placeholderSrc = 'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="#333" opacity="0.5"/><text x="50" y="50" font-family="Arial" font-size="14" fill="white" text-anchor="middle" dominant-baseline="middle">HTML Link</text></svg>');
+
+                const newFloating = { id, x, y, src: placeholderSrc, scale: 1, opacity: 1, name: baseName, images: [], link: fileName, linkedFileContent: fileContent, previewUrl, isEmbed: false };
+                pushHistory({ ...state, floatingImages: [...(state.floatingImages || []), newFloating], selectedIds: [id] });
+            };
+
+            const handleFloatingDrop = async (files, x = 50, y = 50) => {
+                if (!files || files.length === 0) return;
+
+                const htmlFile = Array.from(files).find(f => f.name.endsWith('.html') || f.type === 'text/html');
+                if (htmlFile) {
+                    await createFloatingFromHtml(htmlFile, x, y);
+                    return;
+                }
+
+                const hasUnsupported = Array.from(files).some(file => !isAllowedDropFile(file));
+                if (hasUnsupported) {
+                    alert('Only image or HTML files can be dropped here.');
+                    return;
+                }
+
+                handleFloatingImageUpload(files, x, y);
+            };
+
+            const handleCanvasDrop = async (files, x, y) => {
                 // Check for HTML files first
                 const htmlFile = Array.from(files).find(f => f.name.endsWith('.html') || f.type === 'text/html');
                 if (htmlFile && (activeTab === 2 || activeTab === 3 || activeTab === 4)) {
@@ -857,26 +888,21 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                         const newLabel = { id, x, y, text: baseName, fontSize: 16, color: '#ffffff', bold: false, italic: false, shadow: false, padding: 2, fontFamily: 'Inter, sans-serif', images: [], image: null, link: fileName, linkedFileContent: fileContent, previewUrl, bgColor: '#000000', bgOpacity: 0 };
                         pushHistory({ ...state, textLabels: [...state.textLabels, newLabel], selectedIds: [id] });
                      } else if (activeTab === 4) {
-                         // For floating images, if dropping HTML, it needs a placeholder image or similar. 
-                         // But for now let's assume it just acts as a link container with a placeholder icon if no image.
-                         // Or better, alert user to drop image first.
-                         // Let's create a placeholder floating element.
-                         // A transparent placeholder 100x100
-                         const placeholderSrc = 'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="#333" opacity="0.5"/><text x="50" y="50" font-family="Arial" font-size="14" fill="white" text-anchor="middle" dominant-baseline="middle">HTML Link</text></svg>');
-                         const newFloating = {
-                             id, x, y, src: placeholderSrc, scale: 1, opacity: 1, name: baseName,
-                             images: [], link: fileName, linkedFileContent: fileContent, previewUrl, isEmbed: false
-                         };
-                         const currentFloating = state.floatingImages || [];
-                         pushHistory({ ...state, floatingImages: [...currentFloating, newFloating], selectedIds: [id] });
+                         await createFloatingFromHtml(htmlFile, x, y);
                      }
                      return;
                 }
 
-                if (activeTab === 2) handleImageUpload(files, x, y); 
-                else if (activeTab === 3) handleLabelImageUpload(files, x, y); 
-                else if (activeTab === 4) handleFloatingImageUpload(files, x, y);
-                else if (activeTab === 1) handlePlanUpload(files[0]); 
+                const hasUnsupported = Array.from(files).some(file => !isAllowedDropFile(file));
+                if (hasUnsupported) {
+                    alert('Only image or HTML files can be dropped here.');
+                    return;
+                }
+
+                if (activeTab === 2) handleImageUpload(files, x, y);
+                else if (activeTab === 3) handleLabelImageUpload(files, x, y);
+                else if (activeTab === 4) await handleFloatingDrop(files, x, y);
+                else if (activeTab === 1) handlePlanUpload(files[0]);
             };
             
             const addMarker = () => { const id = 'm-' + Date.now(); const newMarker = { id, name: 'New Marker', images: [], x: 50, y: 50 }; pushHistory({ ...state, markers: [...state.markers, newMarker], selectedIds: [id] }); };
@@ -1036,52 +1062,60 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
 
             const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
             const handleDragLeave = (e) => { e.preventDefault(); setIsDragging(false); };
+            const isAllowedDropFile = (file) => file.type.startsWith('image/') || file.type === 'text/html' || file.name.endsWith('.html');
             
-            const handleDrop = async (e) => { 
-                e.preventDefault(); setIsDragging(false); 
+            const handleDrop = async (e) => {
+                e.preventDefault(); setIsDragging(false);
                 const files = Array.from(e.dataTransfer.files);
-                if (files.length === 0) return; 
-                
+                if (files.length === 0) return;
+
+                const rect = document.getElementById('main-view').getBoundingClientRect();
+                const dropX = ((e.clientX - rect.left) / rect.width) * 100;
+                const dropY = ((e.clientY - rect.top) / rect.height) * 100;
+                const safeX = Math.max(0, Math.min(100, dropX));
+                const safeY = Math.max(0, Math.min(100, dropY));
+
                 const htmlFile = files.find(f => f.name.endsWith('.html') || f.type === 'text/html');
-                
+
                 if (htmlFile) {
-                    const rect = document.getElementById('main-view').getBoundingClientRect();
-                    const dropX = ((e.clientX - rect.left) / rect.width) * 100;
-                    const dropY = ((e.clientY - rect.top) / rect.height) * 100;
-                    const safeX = Math.max(0, Math.min(100, dropX));
-                    const safeY = Math.max(0, Math.min(100, dropY));
-
-                    const fileContent = await readTextFile(htmlFile);
-                    const blob = new Blob([fileContent], { type: 'text/html' });
-                    const previewUrl = URL.createObjectURL(blob);
-                    const fileName = htmlFile.name;
-                    const baseName = getFileNameWithoutExtension(fileName).substring(0, 20);
-
                     if (activeTab === 2) {
                         const id = 'm-' + Date.now();
+                        const fileContent = await readTextFile(htmlFile);
+                        const blob = new Blob([fileContent], { type: 'text/html' });
+                        const previewUrl = URL.createObjectURL(blob);
+                        const fileName = htmlFile.name;
+                        const baseName = getFileNameWithoutExtension(fileName).substring(0, 20);
                         const newMarker = { id, name: baseName, images: [], x: safeX, y: safeY, link: fileName, linkedFileContent: fileContent, previewUrl: previewUrl, isEmbed: false };
                         pushHistory({ ...state, markers: [...state.markers, newMarker], selectedIds: [id] });
                         return;
-                    } 
+                    }
                     else if (activeTab === 3) {
                         const id = 't-' + Date.now();
+                        const fileContent = await readTextFile(htmlFile);
+                        const blob = new Blob([fileContent], { type: 'text/html' });
+                        const previewUrl = URL.createObjectURL(blob);
+                        const fileName = htmlFile.name;
+                        const baseName = getFileNameWithoutExtension(fileName).substring(0, 20);
                         const newLabel = { id, x: safeX, y: safeY, text: baseName, fontSize: 16, color: '#ffffff', bold: false, italic: false, shadow: false, padding: 2, fontFamily: 'Inter, sans-serif', images: [], image: null, link: fileName, linkedFileContent: fileContent, previewUrl: previewUrl, bgColor: '#000000', bgOpacity: 0 };
                         pushHistory({ ...state, textLabels: [...state.textLabels, newLabel], selectedIds: [id] });
                         return;
                     }
                     else if (activeTab === 4) {
-                         const id = 'f-' + Date.now();
-                         const placeholderSrc = 'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="#333" opacity="0.5"/><text x="50" y="50" font-family="Arial" font-size="14" fill="white" text-anchor="middle" dominant-baseline="middle">HTML Link</text></svg>');
-                         const newFloating = { id, x: safeX, y: safeY, src: placeholderSrc, scale: 1, opacity: 1, name: baseName, images: [], link: fileName, linkedFileContent: fileContent, previewUrl, isEmbed: false };
-                         pushHistory({ ...state, floatingImages: [...(state.floatingImages || []), newFloating], selectedIds: [id] });
+                         await createFloatingFromHtml(htmlFile, safeX, safeY);
                          return;
                     }
                 }
 
-                if (activeTab === 1 && files[0].type.startsWith('image/')) handlePlanUpload(files[0]); 
-                else if (activeTab === 2 && files.every(f => f.type.startsWith('image/'))) handleImageUpload(files); 
+                const hasUnsupported = Array.from(files).some(file => !isAllowedDropFile(file));
+                if (hasUnsupported) {
+                    alert('Only image or HTML files can be dropped here.');
+                    return;
+                }
+
+                if (activeTab === 1) handlePlanUpload(files[0]);
+                else if (activeTab === 2) handleImageUpload(files);
                 else if (activeTab === 3) handleLabelImageUpload(files);
-                else if (activeTab === 4) handleFloatingImageUpload(files);
+                else if (activeTab === 4) await handleFloatingDrop(files, safeX, safeY);
             };
 
             const handleWheel = (e) => {
@@ -1491,6 +1525,29 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                                 </div>
                                 );
                             })()}
+
+                            <div className="mt-4 space-y-2 bg-zinc-800/50 border border-zinc-700/60 rounded-lg p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                    <div>
+                                        <div className="text-[10px] uppercase font-bold text-gray-500">Workspace Images</div>
+                                        <div className="text-[11px] text-gray-400">Drop or click to add floating, clickable images.</div>
+                                    </div>
+                                    <button
+                                        onClick={() => { setActiveTab(4); floatingImageInputRef.current.click(); }}
+                                        className="text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded flex items-center gap-1"
+                                    >
+                                        <ImagePlus size={12}/> Add
+                                    </button>
+                                </div>
+                                <div
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={(e) => { e.preventDefault(); handleFloatingDrop(e.dataTransfer.files); }}
+                                    className="border-2 border-dashed border-zinc-700 rounded-lg p-3 text-center text-[11px] text-gray-400 hover:border-indigo-500 hover:text-white transition-all cursor-pointer"
+                                    onClick={() => { setActiveTab(4); floatingImageInputRef.current.click(); }}
+                                >
+                                    Drag files here to place a floating image with adjustable opacity and scale.
+                                </div>
+                            </div>
                             </div>
                         )}
                         {activeTab === 4 && (
@@ -1916,6 +1973,12 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                             <div className="absolute inset-0">
                                 {(state.floatingImages || []).map(f => {
                                     const isSelected = state.selectedIds.includes(f.id);
+                                    const openFloating = () => {
+                                        if(f.isEmbed && f.embeddedHtml) onPreviewRequest({ type: 'embed', embed: f.embeddedHtml });
+                                        else if(f.link && f.previewUrl) onPreviewRequest({ type: 'iframe', link: f.previewUrl });
+                                        else if(f.link) onPreviewRequest({ type: 'iframe', link: f.link });
+                                        else if(f.images && f.images.length > 0) onPreviewRequest({ type: 'image', images: f.images, index: 0 });
+                                    };
                                     return (
                                         <div
                                             id={`floating-${f.id}`}
@@ -1924,23 +1987,13 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                                             style={{ left: `${f.x}%`, top: `${f.y}%` }}
                                             onMouseDown={(e) => handleMouseDown(e, 'floating', f.id)}
                                             onContextMenu={(e) => handleContextMenu(e, f.id)}
-                                            onClick={(e) => {
-                                                if(isPreview) {
-                                                    e.stopPropagation();
-                                                    if(f.isEmbed && f.embeddedHtml) onPreviewRequest({ type: 'embed', embed: f.embeddedHtml });
-                                                    else if(f.link && f.previewUrl) onPreviewRequest({ type: 'iframe', link: f.previewUrl });
-                                                    else if(f.link) onPreviewRequest({ type: 'iframe', link: f.link });
-                                                    else if(f.images && f.images.length > 0) onPreviewRequest({ type: 'image', images: f.images, index: 0 });
-                                                } else {
-                                                    e.stopPropagation();
-                                                }
-                                            }}
+                                            onClick={(e) => { e.stopPropagation(); openFloating(); }}
                                         >
-                                            <div 
-                                                className={`transition-transform duration-300 ${isSelected && !isPreview ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-black rounded' : ''} ${isPreview ? 'hover:scale-105' : ''}`}
-                                                style={{ 
-                                                    opacity: f.opacity !== undefined ? f.opacity : 1, 
-                                                    transform: `scale(${f.scale || 1})` 
+                                            <div
+                                                className={`transition-transform duration-300 hover:scale-105 ${isSelected && !isPreview ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-black rounded' : ''}`}
+                                                style={{
+                                                    opacity: f.opacity !== undefined ? f.opacity : 1,
+                                                    transform: `scale(${f.scale || 1})`
                                                 }}
                                             >
                                                 <img src={f.src} className="block pointer-events-none" style={{ maxWidth: 'none' }} />
