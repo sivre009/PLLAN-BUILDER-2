@@ -53,12 +53,12 @@
             AlignRight, ChevronsUp, AlignJustify, ChevronsDown, 
             Menu, Move, Search, ZoomIn, ZoomOut, MousePointer2, Stamp, MoreHorizontal, 
             BringToFront, SendToBack, CopyPlus, Maximize, Link as LinkIcon, FileCode, Play, Folder,
-            Hash, CaseUpper, Loader2, Package, FileDown
+            Hash, CaseUpper, Loader2, Package, FileDown, ImagePlus
         } from 'lucide-react';
 
         // --- CONSTANTS ---
 
-        const VERSION = "v2025.1.4-dual-export"; 
+        const VERSION = "v2025.1.5-floating-images"; 
 
         const AVAILABLE_FONTS = [
             { name: 'Inter', value: "'Inter', sans-serif", type: 'Sans Serif' },
@@ -137,7 +137,7 @@
         // --- TEMPLATE GENERATOR ---
 
         const getViewerTemplate = (data) => {
-            // Escape forward slashes to prevent closing script tags in data from breaking the viewer script
+            // Escape forward slashes
             const injectedData = JSON.stringify(data).replace(/\//g, '\\/');
             
             const rgbColor = hexToRgb(data.color);
@@ -203,6 +203,13 @@
     .text-label-content { padding: 2px 4px; border-radius: 2px; transition: transform 0.2s ease; }
     .text-label-wrapper:hover { z-index: 110; }
     .text-label-wrapper:hover .text-label-content { transform: scale(1.1); } 
+
+    /* Floating Images CSS */
+    .floating-img-wrapper { position: absolute; transform: translate(-50%, -50%); z-index: 90; cursor: pointer; pointer-events: auto; display: flex; align-items: center; justify-content: center; }
+    .floating-img-wrapper:hover { z-index: 110; }
+    .floating-img-inner { transition: transform 0.3s ease; }
+    .floating-img-inner:hover { transform: scale(1.05); }
+    .floating-img-content { display: block; max-width: none; pointer-events: none; }
     
     #image-modal { position: fixed; inset: 0; z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0); backdrop-filter: blur(0px); visibility: hidden; transition: background 0.4s ease, backdrop-filter 0.4s ease, visibility 0s linear 0.4s; }
     #image-modal.active { visibility: visible; background: rgba(0, 0, 0, 0.9); backdrop-filter: blur(8px); transition: background 0.4s ease, backdrop-filter 0.4s ease, visibility 0s linear 0s; }
@@ -341,6 +348,15 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
              document.documentElement.style.setProperty('--marker-font-size', (appData.fontSize * naturalScaleRatio) + 'px');
              const labels = document.querySelectorAll('.text-label-content');
              labels.forEach(l => { const baseSize = parseFloat(l.getAttribute('data-base-size')); if(baseSize) l.style.fontSize = (baseSize * naturalScaleRatio) + 'px'; });
+             
+             // Scale floating images initially if needed
+             const floatingImgs = document.querySelectorAll('.floating-img-content');
+             floatingImgs.forEach(f => {
+                // We keep floating images at their natural resolution but user scales them. 
+                // Could optionally apply naturalScaleRatio if we wanted them to act like markers.
+                // For now, we trust the user defined scale relative to the plan space.
+             });
+
              const view = document.getElementById('main-view'); const cont = document.getElementById('plan-container'); 
              const fitToScreen = () => { const vw = view.offsetWidth, vh = view.offsetHeight; if(!img.naturalWidth) return; const sc = Math.min((vw-40)/img.naturalWidth, (vh-40)/img.naturalHeight); const scale = sc || 1; const pX = (vw - img.naturalWidth*scale)/2; const pY = (vh - img.naturalHeight*scale)/2; cont.style.transform = \`translate(\${pX}px, \${pY}px) scale(\${scale})\`; window.currentView = { scale, pX, pY }; };
              fitToScreen(); window.addEventListener('resize', fitToScreen);
@@ -387,7 +403,7 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
              };
 
              view.addEventListener('mousedown', e => { 
-                 if(e.target.closest('.marker-wrapper') || e.target.closest('.text-label-wrapper')) return; 
+                 if(e.target.closest('.marker-wrapper') || e.target.closest('.text-label-wrapper') || e.target.closest('.floating-img-wrapper')) return; 
                  handleStart(e.clientX, e.clientY);
              });
              
@@ -396,7 +412,7 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
 
              // Touch Support
              view.addEventListener('touchstart', e => {
-                if(e.target.closest('.marker-wrapper') || e.target.closest('.text-label-wrapper')) return;
+                if(e.target.closest('.marker-wrapper') || e.target.closest('.text-label-wrapper') || e.target.closest('.floating-img-wrapper')) return;
                 if(e.touches.length === 1) {
                     handleStart(e.touches[0].clientX, e.touches[0].clientY);
                 }
@@ -456,6 +472,46 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                 navBar.appendChild(nav); 
             } 
         });
+        
+        // Render Floating Images
+        if(appData.floatingImages) {
+            appData.floatingImages.forEach(img => {
+                const el = document.createElement('div');
+                el.className = 'floating-img-wrapper';
+                el.style.left = img.x + '%';
+                el.style.top = img.y + '%';
+                
+                const inner = document.createElement('div');
+                inner.className = 'floating-img-inner';
+                inner.style.opacity = img.opacity !== undefined ? img.opacity : 1;
+                inner.style.transform = \`scale(\${img.scale || 1})\`;
+                
+                const imageEl = document.createElement('img');
+                imageEl.src = img.src;
+                imageEl.className = 'floating-img-content';
+                
+                inner.appendChild(imageEl);
+                el.appendChild(inner);
+                
+                // Interaction logic
+                const hasInteractivity = (img.images && img.images.length > 0) || img.link || (img.isEmbed && img.embeddedHtml);
+                
+                if (hasInteractivity) {
+                     const clickHandler = (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        if(img.isEmbed && img.embeddedHtml) openEmbed(img.embeddedHtml);
+                        else if(img.link) openLink(img.link);
+                        else if(img.images && img.images.length > 0) openGallery(img.images);
+                     };
+                     el.addEventListener('click', clickHandler);
+                     el.addEventListener('touchend', clickHandler);
+                }
+                
+                markersLayer.appendChild(el);
+            });
+        }
+
         appData.textLabels.forEach(l => { const el = document.createElement('div'); el.className = 'text-label-wrapper'; el.style.left = l.x + '%'; el.style.top = l.y + '%'; if(l.image || (l.images && l.images.length > 0) || l.link || (l.isEmbed && l.embeddedHtml)) { el.addEventListener('click', function(e) { e.stopPropagation(); if(l.isEmbed && l.embeddedHtml) openEmbed(l.embeddedHtml); else if(l.link) openLink(l.link); else { const imgs = l.images && l.images.length > 0 ? l.images : (l.image ? [l.image] : []); openGallery(imgs); } }); el.addEventListener('touchend', function(e) { e.preventDefault(); e.stopPropagation(); if(l.isEmbed && l.embeddedHtml) openEmbed(l.embeddedHtml); else if(l.link) openLink(l.link); else { const imgs = l.images && l.images.length > 0 ? l.images : (l.image ? [l.image] : []); openGallery(imgs); } }); } const fontWeight = l.bold ? 'bold' : 'normal'; const fontStyle = l.italic ? 'italic' : 'normal'; const shadow = l.shadow ? '0 2px 4px rgba(0,0,0,0.8)' : 'none'; const getRgb = (hex) => { const result = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex); return result ? \`\${parseInt(result[1], 16)}, \${parseInt(result[2], 16)}, \${parseInt(result[3], 16)}\` : '0, 0, 0'; }; const bg = \`rgba(\${getRgb(l.bgColor || '#000000')}, \${l.bgOpacity || 0})\`; el.innerHTML = \`<div class="text-label-content" data-base-size="\${l.fontSize}" style="color:\${l.color}; font-size:\${l.fontSize}px; font-weight:\${fontWeight}; font-style:\${fontStyle}; text-shadow:\${shadow}; background-color:\${bg}; padding:\${(l.padding||2)+'px'}; font-family:\${l.fontFamily}">\${l.text}</div>\`; markersLayer.appendChild(el); });
     }
     init();
@@ -469,6 +525,7 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
             planName: null,
             markers: [],
             textLabels: [],
+            floatingImages: [], // New state for floating images
             selectedIds: [], 
             color: '#ffffff',
             numberColor: '#000000',
@@ -513,6 +570,7 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
             const addMarkerImageRef = useRef(null);
             const embedInputRef = useRef(null); 
             const linkFileInputRef = useRef(null);
+            const floatingImageInputRef = useRef(null);
 
             const stateRef = useRef(state);
             useEffect(() => { stateRef.current = state; }, [state]);
@@ -608,6 +666,7 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                                 ...state, 
                                 markers: state.markers.filter(m => !state.selectedIds.includes(m.id)),
                                 textLabels: state.textLabels.filter(l => !state.selectedIds.includes(l.id)),
+                                floatingImages: (state.floatingImages || []).filter(f => !state.selectedIds.includes(f.id)),
                                 selectedIds: []
                             });
                         }
@@ -622,7 +681,8 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                         if (state.selectedIds.length > 0) {
                             const updatedMarkers = state.markers.map(m => state.selectedIds.includes(m.id) ? { ...m, x: Math.max(0, Math.min(100, m.x + moveX)), y: Math.max(0, Math.min(100, m.y + moveY)) } : m);
                             const updatedLabels = state.textLabels.map(l => state.selectedIds.includes(l.id) ? { ...l, x: Math.max(0, Math.min(100, l.x + moveX)), y: Math.max(0, Math.min(100, l.y + moveY)) } : l);
-                            pushHistory({ ...state, markers: updatedMarkers, textLabels: updatedLabels });
+                            const updatedFloating = (state.floatingImages || []).map(f => state.selectedIds.includes(f.id) ? { ...f, x: Math.max(0, Math.min(100, f.x + moveX)), y: Math.max(0, Math.min(100, f.y + moveY)) } : f);
+                            pushHistory({ ...state, markers: updatedMarkers, textLabels: updatedLabels, floatingImages: updatedFloating });
                         }
                     }
                 };
@@ -638,16 +698,13 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                 const x = ((e.clientX - rect.left) / rect.width) * 100;
                 const y = ((e.clientY - rect.top) / rect.height) * 100;
 
-                const clampedX = Math.max(0, Math.min(100, x));
-                const clampedY = Math.max(0, Math.min(100, y));
-
                 const idBase = Date.now() + Math.random().toString(36).substr(2, 5);
                 
                 if (tool === 'stamp-marker') {
-                    const newMarker = { id: 'm-' + idBase, name: 'New Marker', images: [], x: clampedX, y: clampedY };
+                    const newMarker = { id: 'm-' + idBase, name: 'New Marker', images: [], x, y };
                     pushHistory({ ...state, markers: [...state.markers, newMarker] });
                 } else if (tool === 'stamp-label') {
-                    const newLabel = { id: 't-' + idBase, x: clampedX, y: clampedY, text: 'New Label', fontSize: 16, color: '#ffffff', bold: false, italic: false, shadow: false, padding: 2, fontFamily: 'Inter, sans-serif', images: [], image: null, bgColor: '#000000', bgOpacity: 0 };
+                    const newLabel = { id: 't-' + idBase, x, y, text: 'New Label', fontSize: 16, color: '#ffffff', bold: false, italic: false, shadow: false, padding: 2, fontFamily: 'Inter, sans-serif', images: [], image: null, bgColor: '#000000', bgOpacity: 0 };
                     pushHistory({ ...state, textLabels: [...state.textLabels, newLabel] });
                 }
                 if (!e.shiftKey && !e.altKey) setTool('select');
@@ -668,7 +725,8 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                 if (state.selectedIds.length < 2) return;
                 const selectedMarkers = state.markers.filter(m => state.selectedIds.includes(m.id));
                 const selectedLabels = state.textLabels.filter(l => state.selectedIds.includes(l.id));
-                const allSelected = [...selectedMarkers, ...selectedLabels];
+                const selectedFloating = (state.floatingImages || []).filter(f => state.selectedIds.includes(f.id));
+                const allSelected = [...selectedMarkers, ...selectedLabels, ...selectedFloating];
                 if(allSelected.length === 0) return;
 
                 const minX = Math.min(...allSelected.map(i => i.x)); const maxX = Math.max(...allSelected.map(i => i.x));
@@ -685,7 +743,8 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                 };
                 const updatedMarkers = state.markers.map(m => state.selectedIds.includes(m.id) ? updateItem(m) : m);
                 const updatedLabels = state.textLabels.map(l => state.selectedIds.includes(l.id) ? updateItem(l) : l);
-                pushHistory({ ...state, markers: updatedMarkers, textLabels: updatedLabels });
+                const updatedFloating = (state.floatingImages || []).map(f => state.selectedIds.includes(f.id) ? updateItem(f) : f);
+                pushHistory({ ...state, markers: updatedMarkers, textLabels: updatedLabels, floatingImages: updatedFloating });
             };
 
             const handleContextMenu = (e, id) => {
@@ -704,32 +763,45 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                 const { ids } = contextMenu;
                 let newMarkers = [...state.markers];
                 let newLabels = [...state.textLabels];
+                let newFloating = [...(state.floatingImages || [])];
                 let newSelectedIds = [...ids];
 
                 if (action === 'delete') {
                     newMarkers = newMarkers.filter(m => !ids.includes(m.id));
                     newLabels = newLabels.filter(l => !ids.includes(l.id));
+                    newFloating = newFloating.filter(f => !ids.includes(f.id));
                     newSelectedIds = [];
                 } else if (action === 'duplicate') {
                     const markersToDup = newMarkers.filter(m => ids.includes(m.id));
                     const labelsToDup = newLabels.filter(l => ids.includes(l.id));
+                    const floatingToDup = newFloating.filter(f => ids.includes(f.id));
+                    
                     const duplicatedMarkers = markersToDup.map(m => ({ ...m, id: 'm-' + Date.now() + Math.random().toString(36).substr(2, 5), x: m.x + 2, y: m.y + 2 }));
                     const duplicatedLabels = labelsToDup.map(l => ({ ...l, id: 't-' + Date.now() + Math.random().toString(36).substr(2, 5), x: l.x + 2, y: l.y + 2 }));
+                    const duplicatedFloating = floatingToDup.map(f => ({ ...f, id: 'f-' + Date.now() + Math.random().toString(36).substr(2, 5), x: f.x + 2, y: f.y + 2 }));
+                    
                     newMarkers = [...newMarkers, ...duplicatedMarkers];
                     newLabels = [...newLabels, ...duplicatedLabels];
-                    newSelectedIds = [...duplicatedMarkers.map(m => m.id), ...duplicatedLabels.map(l => l.id)];
+                    newFloating = [...newFloating, ...duplicatedFloating];
+                    newSelectedIds = [...duplicatedMarkers.map(m => m.id), ...duplicatedLabels.map(l => l.id), ...duplicatedFloating.map(f => f.id)];
                 } else if (action === 'front') {
                     const markersToMove = newMarkers.filter(m => ids.includes(m.id));
                     const labelsToMove = newLabels.filter(l => ids.includes(l.id));
+                    const floatingToMove = newFloating.filter(f => ids.includes(f.id));
+                    
                     newMarkers = newMarkers.filter(m => !ids.includes(m.id)).concat(markersToMove);
                     newLabels = newLabels.filter(l => !ids.includes(l.id)).concat(labelsToMove);
+                    newFloating = newFloating.filter(f => !ids.includes(f.id)).concat(floatingToMove);
                 } else if (action === 'back') {
                     const markersToMove = newMarkers.filter(m => ids.includes(m.id));
                     const labelsToMove = newLabels.filter(l => ids.includes(l.id));
+                    const floatingToMove = newFloating.filter(f => ids.includes(f.id));
+
                     newMarkers = markersToMove.concat(newMarkers.filter(m => !ids.includes(m.id)));
                     newLabels = labelsToMove.concat(newLabels.filter(l => !ids.includes(l.id)));
+                    newFloating = floatingToMove.concat(newFloating.filter(f => !ids.includes(f.id)));
                 }
-                pushHistory({ ...state, markers: newMarkers, textLabels: newLabels, selectedIds: newSelectedIds });
+                pushHistory({ ...state, markers: newMarkers, textLabels: newLabels, floatingImages: newFloating, selectedIds: newSelectedIds });
                 setContextMenu(null);
             };
 
@@ -748,38 +820,62 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
             const handleImageUpload = (files, startX = 50, startY = 50) => processFiles(files, async () => { if (files.length === 0) return; const newItems = await Promise.all(Array.from(files).map(async f => ({ src: await compressImage(f), name: f.name }))); const newMarkers = newItems.map(item => ({ id: 'm-' + Date.now() + Math.random().toString(36).substr(2, 5), name: item.name, images: [item], x: startX, y: startY })); pushHistory({ ...state, markers: [...state.markers, ...newMarkers] }); });
             const handleLabelImageUpload = (files, startX = 50, startY = 50) => processFiles(files, async () => { if (files.length === 0) return; const newItems = await Promise.all(Array.from(files).map(async f => ({ src: await compressImage(f), name: f.name }))); const newLabels = newItems.map(item => ({ id: 't-' + Date.now() + Math.random().toString(36).substr(2, 5), x: startX, y: startY, text: getFileNameWithoutExtension(item.name).substring(0, 20) || 'New Label', fontSize: 16, color: '#ffffff', bold: false, italic: false, shadow: false, padding: 2, fontFamily: 'Inter, sans-serif', images: [item], image: item, bgColor: '#000000', bgOpacity: 0 })); pushHistory({ ...state, textLabels: [...state.textLabels, ...newLabels] }); });
             
+            const handleFloatingImageUpload = (files, startX = 50, startY = 50) => processFiles(files, async () => {
+                if (files.length === 0) return;
+                const newItems = await Promise.all(Array.from(files).map(async f => ({ src: await compressImage(f), name: f.name })));
+                const newFloating = newItems.map(item => ({
+                    id: 'f-' + Date.now() + Math.random().toString(36).substr(2, 5),
+                    x: startX, y: startY,
+                    src: item.src,
+                    scale: 1,
+                    opacity: 1,
+                    name: item.name,
+                    images: [item], // Included for gallery support
+                    link: null,
+                    isEmbed: false
+                }));
+                const currentFloating = state.floatingImages || [];
+                pushHistory({ ...state, floatingImages: [...currentFloating, ...newFloating] });
+            });
+
             const handleCanvasDrop = async (files, x, y) => { 
                 // Check for HTML files first
                 const htmlFile = Array.from(files).find(f => f.name.endsWith('.html') || f.type === 'text/html');
-                if (htmlFile && (activeTab === 2 || activeTab === 3)) {
+                if (htmlFile && (activeTab === 2 || activeTab === 3 || activeTab === 4)) {
                      const fileContent = await readTextFile(htmlFile);
                      const blob = new Blob([fileContent], { type: 'text/html' });
                      const previewUrl = URL.createObjectURL(blob);
                      const fileName = htmlFile.name;
                      const baseName = getFileNameWithoutExtension(fileName).substring(0, 20);
-                     const id = (activeTab === 2 ? 'm-' : 't-') + Date.now();
+                     const idPrefix = activeTab === 2 ? 'm-' : (activeTab === 3 ? 't-' : 'f-');
+                     const id = idPrefix + Date.now();
                      
                      if (activeTab === 2) {
-                        const newMarker = { 
-                            id, name: baseName, images: [], x, y,
-                            link: fileName, linkedFileContent: fileContent, previewUrl, isEmbed: false
-                        };
+                        const newMarker = { id, name: baseName, images: [], x, y, link: fileName, linkedFileContent: fileContent, previewUrl, isEmbed: false };
                         pushHistory({ ...state, markers: [...state.markers, newMarker], selectedIds: [id] });
-                     } else {
-                        const newLabel = {
-                            id, x, y, text: baseName,
-                            fontSize: 16, color: '#ffffff', bold: false, italic: false, shadow: false, 
-                            padding: 2, fontFamily: 'Inter, sans-serif', 
-                            images: [], image: null, 
-                            link: fileName, linkedFileContent: fileContent, previewUrl, bgColor: '#000000', bgOpacity: 0
-                        };
+                     } else if (activeTab === 3) {
+                        const newLabel = { id, x, y, text: baseName, fontSize: 16, color: '#ffffff', bold: false, italic: false, shadow: false, padding: 2, fontFamily: 'Inter, sans-serif', images: [], image: null, link: fileName, linkedFileContent: fileContent, previewUrl, bgColor: '#000000', bgOpacity: 0 };
                         pushHistory({ ...state, textLabels: [...state.textLabels, newLabel], selectedIds: [id] });
+                     } else if (activeTab === 4) {
+                         // For floating images, if dropping HTML, it needs a placeholder image or similar. 
+                         // But for now let's assume it just acts as a link container with a placeholder icon if no image.
+                         // Or better, alert user to drop image first.
+                         // Let's create a placeholder floating element.
+                         // A transparent placeholder 100x100
+                         const placeholderSrc = 'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="#333" opacity="0.5"/><text x="50" y="50" font-family="Arial" font-size="14" fill="white" text-anchor="middle" dominant-baseline="middle">HTML Link</text></svg>');
+                         const newFloating = {
+                             id, x, y, src: placeholderSrc, scale: 1, opacity: 1, name: baseName,
+                             images: [], link: fileName, linkedFileContent: fileContent, previewUrl, isEmbed: false
+                         };
+                         const currentFloating = state.floatingImages || [];
+                         pushHistory({ ...state, floatingImages: [...currentFloating, newFloating], selectedIds: [id] });
                      }
                      return;
                 }
 
                 if (activeTab === 2) handleImageUpload(files, x, y); 
                 else if (activeTab === 3) handleLabelImageUpload(files, x, y); 
+                else if (activeTab === 4) handleFloatingImageUpload(files, x, y);
                 else if (activeTab === 1) handlePlanUpload(files[0]); 
             };
             
@@ -792,7 +888,7 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
             const handleEmbedUpload = async (e) => {
                 const file = e.target.files[0];
                 if (!file || !replaceTarget.current) return;
-                const { markerId, labelId } = replaceTarget.current; 
+                const { markerId, labelId, floatingId } = replaceTarget.current; 
                 const text = await readTextFile(file);
                 
                 if (markerId) {
@@ -801,6 +897,9 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                 } else if (labelId) {
                     const updatedLabels = state.textLabels.map(l => l.id === labelId ? { ...l, isEmbed: true, embeddedHtml: text } : l);
                     pushHistory({ ...state, textLabels: updatedLabels });
+                } else if (floatingId) {
+                    const updatedFloating = (state.floatingImages || []).map(f => f.id === floatingId ? { ...f, isEmbed: true, embeddedHtml: text } : f);
+                    pushHistory({ ...state, floatingImages: updatedFloating });
                 }
                 e.target.value = '';
                 replaceTarget.current = null;
@@ -809,7 +908,7 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
             const handleLinkFileUpload = async (e) => {
                 const file = e.target.files[0];
                 if (!file || !replaceTarget.current) return;
-                const { markerId, labelId } = replaceTarget.current;
+                const { markerId, labelId, floatingId } = replaceTarget.current;
                 
                 const fileName = file.name; 
                 const fileContent = await readTextFile(file);
@@ -823,6 +922,9 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                 } else if (labelId) {
                     const updatedLabels = state.textLabels.map(l => l.id === labelId ? { ...l, link: fileName, linkedFileContent: fileContent, previewUrl: previewUrl, isEmbed: false } : l);
                     pushHistory({ ...state, textLabels: updatedLabels });
+                } else if (floatingId) {
+                    const updatedFloating = (state.floatingImages || []).map(f => f.id === floatingId ? { ...f, link: fileName, linkedFileContent: fileContent, previewUrl: previewUrl, isEmbed: false } : f);
+                    pushHistory({ ...state, floatingImages: updatedFloating });
                 }
                 e.target.value = '';
                 replaceTarget.current = null;
@@ -831,16 +933,38 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
             const triggerReplaceImage = (markerId, imageIndex) => { replaceTarget.current = { markerId, imageIndex }; replaceImageRef.current.click(); };
             const triggerAddToMarker = (markerId) => { replaceTarget.current = { markerId }; addMarkerImageRef.current.click(); };
             const triggerLabelImageReplace = (labelId) => { replaceTarget.current = { labelId }; labelReplaceInputRef.current.click(); }
-            const triggerEmbedUpload = (id, type) => { replaceTarget.current = type === 'marker' ? { markerId: id } : { labelId: id }; embedInputRef.current.click(); }; 
-            const triggerLinkFileUpload = (id, type) => { replaceTarget.current = type === 'marker' ? { markerId: id } : { labelId: id }; linkFileInputRef.current.click(); };
+            
+            const triggerEmbedUpload = (id, type) => { 
+                if(type === 'marker') replaceTarget.current = { markerId: id };
+                else if(type === 'label') replaceTarget.current = { labelId: id };
+                else if(type === 'floating') replaceTarget.current = { floatingId: id };
+                embedInputRef.current.click(); 
+            }; 
+            const triggerLinkFileUpload = (id, type) => { 
+                if(type === 'marker') replaceTarget.current = { markerId: id };
+                else if(type === 'label') replaceTarget.current = { labelId: id };
+                else if(type === 'floating') replaceTarget.current = { floatingId: id };
+                linkFileInputRef.current.click(); 
+            };
 
             const updateMarker = (id, updates) => { const updatedMarkers = state.markers.map(m => m.id === id ? { ...m, ...updates } : m); pushHistory({ ...state, markers: updatedMarkers }); };
             const deleteMarker = (id) => { pushHistory({ ...state, markers: state.markers.filter(m => m.id !== id), selectedIds: state.selectedIds.filter(sid => sid !== id) }); };
+            
             const addTextLabel = () => { const id = 't-' + Date.now(); const newLabel = { id, x: 50, y: 50, text: 'New Label', fontSize: 16, color: '#ffffff', bold: false, italic: false, shadow: false, padding: 2, fontFamily: 'Inter, sans-serif', image: null, images: [], bgColor: '#000000', bgOpacity: 0 }; pushHistory({ ...state, textLabels: [...state.textLabels, newLabel], selectedIds: [id] }); };
             const updateLabel = (id, updates) => { const updatedLabels = state.textLabels.map(l => l.id === id ? { ...l, ...updates } : l); pushHistory({ ...state, textLabels: updatedLabels }); };
             const updateSelectedLabels = (updates) => { const updatedLabels = state.textLabels.map(l => state.selectedIds.includes(l.id) ? { ...l, ...updates } : l); pushHistory({ ...state, textLabels: updatedLabels }); };
             const deleteLabel = (id) => { pushHistory({ ...state, textLabels: state.textLabels.filter(l => l.id !== id), selectedIds: state.selectedIds.filter(sid => sid !== id) }); };
             const copyLabelStyles = (sourceId) => { const source = state.textLabels.find(l => l.id === sourceId); if (!source) return; const updatedLabels = state.textLabels.map(l => l.id === sourceId ? l : { ...l, fontSize: source.fontSize, fontFamily: source.fontFamily, color: source.color, bgColor: source.bgColor, bgOpacity: source.bgOpacity, bold: source.bold, italic: source.italic, shadow: source.shadow, padding: source.padding }); pushHistory({ ...state, textLabels: updatedLabels }); };
+            
+            // Floating Images
+            const updateFloatingImage = (id, updates) => { 
+                const updatedFloating = (state.floatingImages || []).map(f => f.id === id ? { ...f, ...updates } : f);
+                pushHistory({ ...state, floatingImages: updatedFloating });
+            };
+            const deleteFloatingImage = (id) => {
+                pushHistory({ ...state, floatingImages: (state.floatingImages || []).filter(f => f.id !== id), selectedIds: state.selectedIds.filter(sid => sid !== id) });
+            };
+            
             const saveProject = () => { const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state)); const a = document.createElement('a'); a.href = dataStr; a.download = "plan_project.json"; document.body.appendChild(a); a.click(); a.remove(); };
             const loadProject = (e) => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (e) => { try { const loaded = JSON.parse(e.target.result); pushHistory(loaded); } catch (err) { console.error(err); } }; reader.readAsText(file); e.target.value = ''; };
             
@@ -885,6 +1009,17 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                         }
                     });
                     
+                    if(exportState.floatingImages) {
+                        exportState.floatingImages.forEach(f => {
+                            if (f.linkedFileContent && f.link) {
+                                pagesFolder.file(f.link, f.linkedFileContent);
+                                f.link = `pages/${f.link}`;
+                                delete f.linkedFileContent;
+                                delete f.previewUrl;
+                            }
+                        });
+                    }
+                    
                     const html = getViewerTemplate(exportState);
                     rootFolder.file("index.html", html);
                     
@@ -924,30 +1059,29 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
 
                     if (activeTab === 2) {
                         const id = 'm-' + Date.now();
-                        const newMarker = { 
-                            id, name: baseName, images: [], x: safeX, y: safeY,
-                            link: fileName, linkedFileContent: fileContent, previewUrl: previewUrl, isEmbed: false
-                        };
+                        const newMarker = { id, name: baseName, images: [], x: safeX, y: safeY, link: fileName, linkedFileContent: fileContent, previewUrl: previewUrl, isEmbed: false };
                         pushHistory({ ...state, markers: [...state.markers, newMarker], selectedIds: [id] });
                         return;
                     } 
                     else if (activeTab === 3) {
                         const id = 't-' + Date.now();
-                        const newLabel = {
-                            id, x: safeX, y: safeY, text: baseName,
-                            fontSize: 16, color: '#ffffff', bold: false, italic: false, shadow: false, 
-                            padding: 2, fontFamily: 'Inter, sans-serif', 
-                            images: [], image: null, 
-                            link: fileName, linkedFileContent: fileContent, previewUrl: previewUrl, bgColor: '#000000', bgOpacity: 0
-                        };
+                        const newLabel = { id, x: safeX, y: safeY, text: baseName, fontSize: 16, color: '#ffffff', bold: false, italic: false, shadow: false, padding: 2, fontFamily: 'Inter, sans-serif', images: [], image: null, link: fileName, linkedFileContent: fileContent, previewUrl: previewUrl, bgColor: '#000000', bgOpacity: 0 };
                         pushHistory({ ...state, textLabels: [...state.textLabels, newLabel], selectedIds: [id] });
                         return;
+                    }
+                    else if (activeTab === 4) {
+                         const id = 'f-' + Date.now();
+                         const placeholderSrc = 'data:image/svg+xml;base64,' + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="#333" opacity="0.5"/><text x="50" y="50" font-family="Arial" font-size="14" fill="white" text-anchor="middle" dominant-baseline="middle">HTML Link</text></svg>');
+                         const newFloating = { id, x: safeX, y: safeY, src: placeholderSrc, scale: 1, opacity: 1, name: baseName, images: [], link: fileName, linkedFileContent: fileContent, previewUrl, isEmbed: false };
+                         pushHistory({ ...state, floatingImages: [...(state.floatingImages || []), newFloating], selectedIds: [id] });
+                         return;
                     }
                 }
 
                 if (activeTab === 1 && files[0].type.startsWith('image/')) handlePlanUpload(files[0]); 
                 else if (activeTab === 2 && files.every(f => f.type.startsWith('image/'))) handleImageUpload(files); 
-                else if (activeTab === 3) handleLabelImageUpload(files); 
+                else if (activeTab === 3) handleLabelImageUpload(files);
+                else if (activeTab === 4) handleFloatingImageUpload(files);
             };
 
             const handleWheel = (e) => {
@@ -1084,7 +1218,7 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                     {!isPreview && (
                     <aside className={`${isSidebarOpen ? 'w-80' : 'w-0 opacity-0 overflow-hidden'} bg-zinc-900 border-r border-zinc-800 flex flex-col h-full z-10 shadow-xl transition-all duration-300 ease-in-out ${isDragging ? 'bg-zinc-800 ring-2 ring-indigo-500' : ''}`} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
                         <div className="flex border-b border-zinc-800 min-w-80">
-                        {[{ id: 1, label: 'Plan', icon: Layout }, { id: 2, label: 'Markers & Style', icon: MapPin }, { id: 3, label: 'Labels', icon: Type }].map(tab => (
+                        {[{ id: 1, label: 'Plan', icon: Layout }, { id: 2, label: 'Markers', icon: MapPin }, { id: 3, label: 'Labels', icon: Type }, { id: 4, label: 'Images', icon: ImagePlus }].map(tab => (
                             <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-3 flex flex-col items-center gap-1 text-[10px] uppercase font-bold tracking-wider transition-colors ${activeTab === tab.id ? 'text-indigo-500 border-b-2 border-indigo-500 bg-zinc-800/50' : 'text-gray-500 hover:text-gray-300 hover:bg-zinc-800'}`}><tab.icon size={18} />{tab.label}</button>
                         ))}
                         </div>
@@ -1099,6 +1233,7 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                         <input type="file" ref={embedInputRef} className="hidden" accept=".html" onChange={handleEmbedUpload} />
                         <input type="file" ref={linkFileInputRef} className="hidden" accept=".html" onChange={handleLinkFileUpload} />
                         <input type="file" ref={labelReplaceInputRef} className="hidden" accept="image/*" onChange={handleLabelImageReplace} />
+                        <input type="file" ref={floatingImageInputRef} className="hidden" multiple accept="image/*" onChange={(e) => handleFloatingImageUpload(e.target.files)} />
 
                         {activeTab === 1 && (
                             <div className="space-y-4">
@@ -1358,6 +1493,101 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                             })()}
                             </div>
                         )}
+                        {activeTab === 4 && (
+                            <div className="space-y-4">
+                                <div className="bg-zinc-800/50 p-3 rounded-lg border border-zinc-700/50">
+                                    <h2 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Floating Images</h2>
+                                    <div onClick={() => floatingImageInputRef.current.click()} className="border-2 border-dashed border-zinc-700 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-500 hover:bg-zinc-800/50 transition-all group">
+                                        <ImagePlus className="mx-auto text-gray-500 group-hover:text-indigo-400 mb-2" size={20} />
+                                        <p className="text-[10px] text-gray-400 group-hover:text-white">Add Images</p>
+                                    </div>
+                                    <p className="text-[9px] text-gray-500 mt-2 text-center">Drag & drop images anywhere on canvas to place them.</p>
+                                </div>
+
+                                {/* Selected Image Controls */}
+                                {state.selectedIds.some(id => id.startsWith('f-')) && (() => {
+                                    const selectedId = state.selectedIds.find(id => id.startsWith('f-'));
+                                    const img = (state.floatingImages || []).find(f => f.id === selectedId);
+                                    if (!img) return null;
+                                    
+                                    return (
+                                        <div className="space-y-3 bg-zinc-800 p-3 rounded-lg border border-indigo-500/30 animate-in fade-in zoom-in-95">
+                                            <div className="flex justify-between items-center mb-1">
+                                                <h3 className="text-xs font-bold text-indigo-400">Selected Image</h3>
+                                            </div>
+                                            
+                                            <div className="space-y-2">
+                                                <div>
+                                                    <label className="text-[10px] text-gray-500 block mb-1">Scale: {img.scale || 1}x</label>
+                                                    <input type="range" min="0.1" max="5" step="0.1" value={img.scale || 1} onChange={(e) => updateFloatingImage(img.id, { scale: parseFloat(e.target.value) })} className="w-full accent-indigo-500 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer"/>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] text-gray-500 block mb-1">Opacity: {img.opacity !== undefined ? img.opacity : 1}</label>
+                                                    <input type="range" min="0" max="1" step="0.1" value={img.opacity !== undefined ? img.opacity : 1} onChange={(e) => updateFloatingImage(img.id, { opacity: parseFloat(e.target.value) })} className="w-full accent-indigo-500 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer"/>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex flex-col gap-1 pt-2 border-t border-zinc-700/50">
+                                                {!img.isEmbed && (
+                                                    <div className="flex items-center gap-2">
+                                                        <LinkIcon size={10} className="text-gray-500 shrink-0"/>
+                                                        {img.link ? (
+                                                            <div className="flex-1 flex items-center gap-1 min-w-0">
+                                                                <span className="text-[9px] text-indigo-400 truncate" title={img.link}>{img.link}</span>
+                                                                <button onClick={(e) => { e.stopPropagation(); updateFloatingImage(img.id, { link: null, linkedFileContent: null, previewUrl: null }); }} className="text-red-400 hover:text-white"><X size={10}/></button>
+                                                            </div>
+                                                        ) : (
+                                                            <button 
+                                                                onClick={(e) => { e.stopPropagation(); triggerLinkFileUpload(img.id, 'floating'); }}
+                                                                className="text-[9px] bg-zinc-700 hover:bg-zinc-600 text-gray-300 px-2 py-0.5 rounded flex-1 text-left"
+                                                            >
+                                                                Select HTML File...
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
+                                                
+                                                <div className="flex items-center gap-2">
+                                                    <label className="flex items-center gap-1 text-[9px] text-gray-500 cursor-pointer">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            checked={img.isEmbed || false} 
+                                                            onChange={(e) => updateFloatingImage(img.id, { isEmbed: e.target.checked, link: null })} 
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            className="accent-indigo-500 rounded w-3 h-3"
+                                                        />
+                                                        Embed
+                                                    </label>
+                                                    {img.isEmbed && (
+                                                        <button 
+                                                            onClick={(e) => { e.stopPropagation(); triggerEmbedUpload(img.id, 'floating'); }}
+                                                            className="text-[9px] bg-zinc-700 hover:bg-zinc-600 text-gray-300 px-2 py-0.5 rounded flex items-center gap-1"
+                                                        >
+                                                            <FileCode size={8} />
+                                                            {img.embeddedHtml ? 'Update' : 'Upload'}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                                
+                                <div className="space-y-1 max-h-[40vh] overflow-y-auto mb-4 custom-scrollbar">
+                                    {(state.floatingImages || []).map(f => (
+                                        <div key={f.id} onClick={(e) => handleSelection(f.id, e.ctrlKey || e.metaKey)} className={`flex items-center gap-2 p-2 rounded cursor-pointer text-xs transition-colors ${state.selectedIds.includes(f.id) ? 'bg-indigo-900/30 border border-indigo-500/50 text-white' : 'hover:bg-zinc-800 text-gray-400 border border-transparent'}`} onContextMenu={(e) => handleContextMenu(e, f.id)}>
+                                            <div className="w-8 h-8 shrink-0 rounded overflow-hidden border border-zinc-700 bg-black">
+                                                <img src={f.src} className="w-full h-full object-cover"/>
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="truncate text-[10px]" title={f.name}>{f.name}</div>
+                                            </div>
+                                            <button onClick={(e) => { e.stopPropagation(); deleteFloatingImage(f.id); }} className="hover:text-red-400 text-gray-500"><Trash2 size={12}/></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                         </div>
                         <div className="p-3 border-t border-zinc-800 min-w-80 text-center"><span className="text-[10px] text-gray-600 font-mono uppercase tracking-widest opacity-50">by JT • {VERSION}</span></div>
                     </aside>
@@ -1435,6 +1665,7 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                 if (!isPreview) {
                     if (type === 'marker') setActiveTab(2);
                     if (type === 'label') setActiveTab(3);
+                    if (type === 'floating') setActiveTab(4);
                 }
 
                 e.stopPropagation(); e.preventDefault();
@@ -1458,6 +1689,7 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                         const idsToClone = newSelectedIds;
                         const clonedMarkers = [];
                         const clonedLabels = [];
+                        const clonedFloating = [];
                         const newIdsMap = {}; 
                         
                         currentState.markers.forEach(m => {
@@ -1475,20 +1707,30 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                                 newIdsMap[l.id] = newId;
                             }
                         });
+
+                        (currentState.floatingImages || []).forEach(f => {
+                            if(idsToClone.includes(f.id)) {
+                                const newId = 'f-' + Date.now() + Math.random().toString(36).substr(2, 5);
+                                clonedFloating.push({ ...f, id: newId });
+                                newIdsMap[f.id] = newId;
+                            }
+                        });
                         
                         const nextMarkers = [...currentState.markers, ...clonedMarkers];
                         const nextLabels = [...currentState.textLabels, ...clonedLabels];
+                        const nextFloating = [...(currentState.floatingImages || []), ...clonedFloating];
                         const nextSelectedIds = idsToClone.map(oldId => newIdsMap[oldId]).filter(Boolean);
                         const newClickedId = newIdsMap[id];
                         
-                        pushHistory({ ...currentState, markers: nextMarkers, textLabels: nextLabels, selectedIds: nextSelectedIds });
+                        pushHistory({ ...currentState, markers: nextMarkers, textLabels: nextLabels, floatingImages: nextFloating, selectedIds: nextSelectedIds });
                         
                         draggingItem.current = { 
                             type, id: newClickedId, startX: e.clientX, startY: e.clientY, 
                             rectWidth: rect.width, rectHeight: rect.height, 
                             initialPositions: {
                                 markers: nextMarkers.reduce((acc, m) => ({ ...acc, [m.id]: { x: m.x, y: m.y } }), {}),
-                                labels: nextLabels.reduce((acc, l) => ({ ...acc, [l.id]: { x: l.x, y: l.y } }), {})
+                                labels: nextLabels.reduce((acc, l) => ({ ...acc, [l.id]: { x: l.x, y: l.y } }), {}),
+                                floating: nextFloating.reduce((acc, f) => ({ ...acc, [f.id]: { x: f.x, y: f.y } }), {})
                             }
                         };
                     
@@ -1498,7 +1740,8 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                         rectWidth: rect.width, rectHeight: rect.height, 
                         initialPositions: {
                             markers: currentState.markers.reduce((acc, m) => ({ ...acc, [m.id]: { x: m.x, y: m.y } }), {}),
-                            labels: currentState.textLabels.reduce((acc, l) => ({ ...acc, [l.id]: { x: l.x, y: l.y } }), {})
+                            labels: currentState.textLabels.reduce((acc, l) => ({ ...acc, [l.id]: { x: l.x, y: l.y } }), {}),
+                            floating: (currentState.floatingImages || []).reduce((acc, f) => ({ ...acc, [f.id]: { x: f.x, y: f.y } }), {})
                         }
                     };
                 }
@@ -1521,9 +1764,9 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                 const idsToMove = currentState.selectedIds.includes(draggingItem.current.id) ? currentState.selectedIds : [draggingItem.current.id];
 
                 idsToMove.forEach(id => {
-                    const el = document.getElementById(id.startsWith('m') ? `marker-${id}` : `label-${id}`);
+                    const el = document.getElementById(id.startsWith('m') ? `marker-${id}` : (id.startsWith('t') ? `label-${id}` : `floating-${id}`));
                     if(el) {
-                        const init = id.startsWith('m') ? initialPositions.markers[id] : initialPositions.labels[id];
+                        const init = id.startsWith('m') ? initialPositions.markers[id] : (id.startsWith('t') ? initialPositions.labels[id] : initialPositions.floating[id]);
                         if(init) {
                             const newX = Math.max(0, Math.min(100, init.x + deltaXPercent));
                             const newY = Math.max(0, Math.min(100, init.y + deltaYPercent));
@@ -1567,8 +1810,17 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                             }
                             return l;
                         });
+
+                        const updatedFloating = (currentState.floatingImages || []).map(f => {
+                            if (idsToMove.includes(f.id)) {
+                                const init = initialPositions.floating[f.id];
+                                if(!init) return f;
+                                return { ...f, x: Math.max(0, Math.min(100, init.x + deltaXPercent)), y: Math.max(0, Math.min(100, init.y + deltaYPercent)) };
+                            }
+                            return f;
+                        });
                         
-                        pushHistory({ ...currentState, markers: updatedMarkers, textLabels: updatedLabels, selectedIds: idsToMove });
+                        pushHistory({ ...currentState, markers: updatedMarkers, textLabels: updatedLabels, floatingImages: updatedFloating, selectedIds: idsToMove });
                 } else {
                     if (!(e.ctrlKey || e.metaKey) && !e.altKey) { 
                         pushHistory({ ...currentState, selectedIds: [id] });
@@ -1587,7 +1839,6 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                 const x = ((e.clientX - rect.left) / rect.width) * 100;
                 const y = ((e.clientY - rect.top) / rect.height) * 100;
                 
-                // FIXED: Accept any file type, App will filter
                 const files = Array.from(e.dataTransfer.files);
                 if (files.length > 0) onCanvasDrop(files, x, y);
             };
@@ -1663,6 +1914,41 @@ ${showSplash ? `<div id="splash-screen"><button class="splash-btn" onclick="ente
                         <div ref={containerRef} className="relative inline-block">
                             <img src={state.plan} className="max-w-none pointer-events-none block" draggable={false} style={{ height: '80vh', width: 'auto' }}/>
                             <div className="absolute inset-0">
+                                {(state.floatingImages || []).map(f => {
+                                    const isSelected = state.selectedIds.includes(f.id);
+                                    return (
+                                        <div
+                                            id={`floating-${f.id}`}
+                                            key={f.id}
+                                            className={`absolute transform -translate-x-1/2 -translate-y-1/2 z-30 hover:z-40 cursor-grab active:cursor-grabbing group ${isPreview ? 'cursor-pointer' : ''}`}
+                                            style={{ left: `${f.x}%`, top: `${f.y}%` }}
+                                            onMouseDown={(e) => handleMouseDown(e, 'floating', f.id)}
+                                            onContextMenu={(e) => handleContextMenu(e, f.id)}
+                                            onClick={(e) => {
+                                                if(isPreview) {
+                                                    e.stopPropagation();
+                                                    if(f.isEmbed && f.embeddedHtml) onPreviewRequest({ type: 'embed', embed: f.embeddedHtml });
+                                                    else if(f.link && f.previewUrl) onPreviewRequest({ type: 'iframe', link: f.previewUrl });
+                                                    else if(f.link) onPreviewRequest({ type: 'iframe', link: f.link });
+                                                    else if(f.images && f.images.length > 0) onPreviewRequest({ type: 'image', images: f.images, index: 0 });
+                                                } else {
+                                                    e.stopPropagation();
+                                                }
+                                            }}
+                                        >
+                                            <div 
+                                                className={`transition-transform duration-300 ${isSelected && !isPreview ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-black rounded' : ''} ${isPreview ? 'hover:scale-105' : ''}`}
+                                                style={{ 
+                                                    opacity: f.opacity !== undefined ? f.opacity : 1, 
+                                                    transform: `scale(${f.scale || 1})` 
+                                                }}
+                                            >
+                                                <img src={f.src} className="block pointer-events-none" style={{ maxWidth: 'none' }} />
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+
                                 {state.markers.map((m, i) => {
                                     const isSelected = state.selectedIds.includes(m.id);
                                     return (
